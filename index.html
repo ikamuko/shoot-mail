@@ -8,28 +8,28 @@
 @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;500;700&family=Space+Mono:wght@400;700&display=swap');
 
 :root {
-  --bg: #0d0d0d;
-  --surface: #181818;
-  --surface2: #202020;
-  --surface3: #282828;
-  --border: #2e2e2e;
-  --border2: #404040;
-  --text: #ebebeb;
-  --text2: #a0a0a0;
-  --text3: #585858;
-  --accent: #c8f064;
-  --accent2: #a8d040;
-  --red: #ff6060;
-  --amber: #ffb840;
-  --blue: #60a8f0;
-  --teal: #40c8b8;
-  --pink: #f080a8;
-  --purple: #a080d8;
-  --cat-model: #f080a8;
-  --cat-studio: #60a8f0;
-  --cat-hairmake: #ffb840;
-  --cat-camera: #40c8b8;
-  --cat-other: #707070;
+  --bg: #f5f5f3;
+  --surface: #ffffff;
+  --surface2: #f0f0ee;
+  --surface3: #e8e8e5;
+  --border: #e0e0dc;
+  --border2: #c8c8c4;
+  --text: #1a1a1a;
+  --text2: #555550;
+  --text3: #999994;
+  --accent: #2d7a2d;
+  --accent2: #226022;
+  --red: #cc3333;
+  --amber: #cc8800;
+  --blue: #2266cc;
+  --teal: #117766;
+  --pink: #cc4477;
+  --purple: #6644cc;
+  --cat-model: #cc4477;
+  --cat-studio: #2266cc;
+  --cat-hairmake: #cc8800;
+  --cat-camera: #117766;
+  --cat-other: #888884;
 }
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 html, body { height: 100%; overflow: hidden; }
@@ -53,8 +53,8 @@ body { font-family: 'Noto Sans JP', sans-serif; background: var(--bg); color: va
 .btn { display: inline-flex; align-items: center; gap: 5px; padding: 6px 13px; border-radius: 6px; border: 1px solid var(--border2); background: transparent; color: var(--text); font-family: 'Noto Sans JP', sans-serif; font-size: 12px; cursor: pointer; transition: all 0.15s; white-space: nowrap; }
 .btn:hover { background: var(--surface3); }
 .btn:active { transform: scale(0.97); }
-.btn-primary { background: var(--accent); border-color: var(--accent); color: #111; font-weight: 700; }
-.btn-primary:hover { background: var(--accent2); border-color: var(--accent2); }
+.btn-primary { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 700; }
+.btn-primary:hover { background: var(--accent2); border-color: var(--accent2); color: #fff; }
 .btn-sm { padding: 4px 9px; font-size: 11px; }
 .btn-ghost { border-color: transparent; }
 .btn-ghost:hover { border-color: var(--border); }
@@ -110,12 +110,12 @@ body { font-family: 'Noto Sans JP', sans-serif; background: var(--bg); color: va
 .mail-preview { font-size: 11px; color: var(--text3); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .mail-chips { display: flex; gap: 3px; margin-top: 5px; flex-wrap: wrap; }
 .chip { font-size: 9px; font-weight: 700; padding: 2px 6px; border-radius: 8px; letter-spacing: 0.3px; }
-.chip-model { background: rgba(240,128,168,0.15); color: var(--cat-model); }
-.chip-studio { background: rgba(96,168,240,0.15); color: var(--cat-studio); }
-.chip-hairmake { background: rgba(255,184,64,0.15); color: var(--cat-hairmake); }
-.chip-camera { background: rgba(64,200,184,0.15); color: var(--cat-camera); }
-.chip-proj { background: rgba(200,240,100,0.1); color: var(--accent); }
-.chip-new { background: rgba(200,240,100,0.2); color: var(--accent); }
+.chip-model { background: rgba(204,68,119,0.1); color: var(--cat-model); border: 1px solid rgba(204,68,119,0.25); }
+.chip-studio { background: rgba(34,102,204,0.1); color: var(--cat-studio); border: 1px solid rgba(34,102,204,0.25); }
+.chip-hairmake { background: rgba(204,136,0,0.1); color: var(--cat-hairmake); border: 1px solid rgba(204,136,0,0.25); }
+.chip-camera { background: rgba(17,119,102,0.1); color: var(--cat-camera); border: 1px solid rgba(17,119,102,0.25); }
+.chip-proj { background: rgba(45,122,45,0.1); color: var(--accent); border: 1px solid rgba(45,122,45,0.25); }
+.chip-new { background: rgba(45,122,45,0.15); color: var(--accent); border: 1px solid rgba(45,122,45,0.3); }
 
 /* DETAIL */
 .detail-panel { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
@@ -135,7 +135,7 @@ body { font-family: 'Noto Sans JP', sans-serif; background: var(--bg); color: va
 /* AI CARD */
 .ai-card { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; overflow: hidden; }
 .ai-card-hd { display: flex; align-items: center; justify-content: space-between; padding: 10px 14px; border-bottom: 1px solid var(--border); background: rgba(200,240,100,0.04); }
-.ai-badge { font-size: 9px; padding: 2px 6px; background: var(--accent); color: #111; border-radius: 3px; font-weight: 700; letter-spacing: 1px; }
+.ai-badge { font-size: 9px; padding: 2px 6px; background: var(--accent); color: #fff; border-radius: 3px; font-weight: 700; letter-spacing: 1px; }
 .ai-hd-title { display: flex; align-items: center; gap: 7px; font-size: 11px; font-weight: 700; color: var(--accent); }
 .ai-body { padding: 14px; }
 .ai-summary { font-size: 12px; line-height: 1.9; color: var(--text); margin-bottom: 12px; }
@@ -216,7 +216,7 @@ code { font-family: 'Space Mono', monospace; font-size: 10px; background: var(--
 .setup-subtitle { font-size: 12px; color: var(--text3); margin-bottom: 24px; }
 .setup-step { background: var(--surface2); border-radius: 8px; padding: 16px; margin-bottom: 14px; }
 .setup-step-title { font-size: 12px; font-weight: 700; margin-bottom: 8px; color: var(--text); display: flex; align-items: center; gap: 8px; }
-.step-num { width: 20px; height: 20px; border-radius: 50%; background: var(--accent); color: #111; font-size: 10px; font-weight: 700; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+.step-num { width: 20px; height: 20px; border-radius: 50%; background: var(--accent); color: #fff; font-size: 10px; font-weight: 700; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
 .setup-step p { font-size: 11px; color: var(--text2); line-height: 1.8; }
 .setup-step a { color: var(--accent); }
 .setup-field { margin-top: 10px; }
@@ -626,7 +626,7 @@ function connectGmail() {
   }
   const params = new URLSearchParams({
     client_id: S.config.clientId,
-    redirect_uri: location.href.split('?')[0],
+    redirect_uri: location.origin + location.pathname,
     response_type: 'token',
     scope: GMAIL_SCOPE,
     include_granted_scopes: 'true'
@@ -792,7 +792,15 @@ function extractBody(payload) {
   if (!payload) return '';
   const parts = payload.parts || [payload];
   for (const p of parts) {
-    if (p.mimeType === 'text/plain' && p.body?.data) return atob(p.body.data.replace(/-/g,'+').replace(/_/g,'/'));
+    if (p.mimeType === 'text/plain' && p.body?.data) {
+      try {
+        const b64 = p.body.data.replace(/-/g,'+').replace(/_/g,'/');
+        const binary = atob(b64);
+        const bytes = new Uint8Array(binary.length);
+        for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+        return new TextDecoder('utf-8').decode(bytes);
+      } catch(e) { return p.body.data; }
+    }
     if (p.parts) { const r = extractBody(p); if (r) return r; }
   }
   return '';
