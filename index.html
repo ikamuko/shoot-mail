@@ -352,6 +352,10 @@ code { font-family: 'Space Mono', monospace; font-size: 10px; background: var(--
         <option value="90">直近90日</option>
       </select>
     </div>
+    <div class="modal-field">
+      <div class="modal-lbl">メール署名（返信時に自動挿入）</div>
+      <textarea class="modal-input" id="cfgSignature" rows="5" style="resize:vertical;line-height:1.7" placeholder="例：&#10;--&#10;小向 もも&#10;株式会社〇〇 EC事業部&#10;m-komukai@example.jp"></textarea>
+    </div>
     <div class="modal-ft">
       <button class="btn" onclick="closeSettings()">キャンセル</button>
       <button class="btn btn-danger btn-sm" onclick="resetAll()">データリセット</button>
@@ -370,6 +374,7 @@ code { font-family: 'Space Mono', monospace; font-size: 10px; background: var(--
     </div>
     <button class="btn btn-ghost btn-sm" onclick="openSettings()">⚙</button>
     <button class="btn btn-sm" onclick="openProjModal()">＋ 案件</button>
+    <button class="btn btn-sm" onclick="clearMailsOnly()" title="取得済みメールを削除して再取得">🔄 再取得</button>
     <button class="btn btn-sm btn-primary" onclick="fetchMails()">↓ メール取得</button>
   </div>
 </div>
@@ -485,7 +490,8 @@ const S = {
     geminiKey: '',
     clientId: '',
     extraKeywords: '',  // ユーザー追加KW（任意）
-    fetchDays: 30       // 取得期間（日数）
+    fetchDays: 30,      // 取得期間（日数）
+    signature: ''       // メール署名
   }
 };
 
@@ -776,6 +782,7 @@ function parseGmailMsg(msg) {
     threadId: msg.threadId,
     sender: h.from || '不明',
     to: h.to || '',
+    cc: h.cc || '',
     subject: h.subject || '（件名なし）',
     date: h.date || '',
     body: body,
@@ -1112,6 +1119,14 @@ function switchTab(tab) {
     body.innerHTML = `<div class="mail-body-box">${esc(m.body||'本文なし')}</div>`;
   } else if (tab === 'reply') {
     body.style.display = 'none'; reply.style.display = 'block';
+    // 署名を自動挿入（空のときだけ）
+    const ta = document.getElementById('replyTa');
+    if (ta && !ta.value && S.config.signature) {
+      ta.value = '\n\n' + S.config.signature;
+      // カーソルを先頭に
+      ta.setSelectionRange(0, 0);
+      ta.focus();
+    }
   }
 }
 
@@ -1219,40 +1234,96 @@ ${tasks||'なし'}`;
       body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] })
     });
     const data = await res.json();
-    ta.value = data?.candidates?.[0]?.content?.parts?.[0]?.text || '生成失敗';
+    let generated = data?.candidates?.[0]?.content?.parts?.[0]?.text || '生成失敗';
+    // 署名を末尾に追加
+    if (S.config.signature && !generated.includes(S.config.signature)) {
+      generated = generated + '\n\n' + S.config.signature;
+    }
+    ta.value = generated;
   } catch(e) { ta.value = 'エラーが発生しました'; }
   ta.disabled = false;
+}
+
+function insertSignature() {
+  const ta = document.getElementById('replyTa');
+  if (!ta) return;
+  const sig = S.config.signature || '';
+  if (!sig) { toast('設定から署名を登録してください', 'err'); return; }
+  if (ta.value.includes(sig)) return; // 既に入っていれば挿入しない
+  const pos = ta.selectionStart;
+  ta.value = ta.value.slice(0, pos) + '\n\n' + sig + ta.value.slice(pos);
+  ta.setSelectionRange(pos, pos);
+  ta.focus();
+}
+
+function insertSignature() {
+  const ta = document.getElementById('replyTa');
+  if (!ta) return;
+  const sig = S.config.signature || '';
+  if (!sig) { toast('設定（⚙）から署名を登録してください', 'err'); return; }
+  if (ta.value.includes(sig)) return;
+  const pos = ta.selectionStart || ta.value.length;
+  ta.value = ta.value.slice(0, pos) + '\n\n' + sig + ta.value.slice(pos);
+  ta.setSelectionRange(pos, pos);
+  ta.focus();
 }
 
 async function sendReply(mailId) {
   const m = S.mails.find(x=>x.id===mailId);
   if (!m) return;
-  const body = document.getElementById('replyTa')?.value?.trim();
-  if (!body) { toast('返信内容を入力してください', 'err'); return; }
-  if (!confirm(`「${senderName(m.sender)}」へ返信を送信しますか？`)) return;
+  const replyBody = document.getElementById('replyTa')?.value;
+  if (!replyBody?.trim()) { toast('返信内容を入力してください', 'err'); return; }
+
+  // 全員返信：送信者 + 元のTo（自分以外）+ CC
+  const toAddrs = m.sender || '';
+  const ccAddrs = [m.cc, m.to].filter(a => a && a !== 'me' && !a.includes(S.config.clientId)).join(', ').replace(/,\s*,/g,',').trim();
+  const confirmMsg = ccAddrs
+    ? 'To: ' + senderName(m.sender) + '\nCC: ' + ccAddrs + '\n\n全員に返信しますか？'
+    : '「' + senderName(m.sender) + '」へ返信を送信しますか？';
+  if (!confirm(confirmMsg)) return;
   if (!S.gmailToken) { toast('Gmail接続が必要です', 'err'); return; }
 
   loading(true, '送信中...');
   try {
-    const raw = makeGmailRaw(m.sender, m.to||'me', 'Re: '+m.subject, body, m.threadId);
+    // 引用文を生成（Gmail標準形式）
+    const dateStr = m.date ? new Date(m.date).toLocaleString('ja-JP') : '';
+    const quotedLines = (m.body || '').split('\n').map(l => '> ' + l).join('\n');
+    const fullBody = replyBody + '\n\n'
+      + '--- ' + senderName(m.sender) + ' (' + dateStr + ') の返信 ---\n'
+      + quotedLines;
+
+    const raw = makeGmailRaw(toAddrs, ccAddrs, 'Re: ' + m.subject, fullBody);
     const res = await fetch('https://gmail.googleapis.com/gmail/v1/users/me/messages/send', {
       method: 'POST',
-      headers: { Authorization: `Bearer ${S.gmailToken}`, 'Content-Type': 'application/json' },
+      headers: { Authorization: 'Bearer ' + S.gmailToken, 'Content-Type': 'application/json' },
       body: JSON.stringify({ raw, threadId: m.threadId })
     });
     if (res.ok) {
-      toast('返信を送信しました', 'ok');
+      toast('全員に返信しました', 'ok');
+      document.getElementById('replyTa').value = '';
       switchTab('summary');
     } else {
-      throw new Error('送信失敗');
+      const err = await res.json();
+      throw new Error(err.error?.message || '送信失敗');
     }
-  } catch(e) { toast('送信エラー: '+e.message, 'err'); }
+  } catch(e) { toast('送信エラー: ' + e.message, 'err'); }
   finally { loading(false); }
 }
 
-function makeGmailRaw(to, from, subject, body, threadId) {
-  const msg = [`To: ${to}`,`Subject: =?UTF-8?B?${btoa(unescape(encodeURIComponent(subject)))}?=`,'MIME-Version: 1.0','Content-Type: text/plain; charset=utf-8','','',body].join('\r\n');
-  return btoa(unescape(encodeURIComponent(msg))).replace(/\+/g,'-').replace(/\//g,'_').replace(/=/g,'');
+function makeGmailRaw(to, cc, subject, body) {
+  const encSubject = '=?UTF-8?B?' + btoa(unescape(encodeURIComponent(subject))) + '?=';
+  const encBody = btoa(unescape(encodeURIComponent(body)));
+  const lines = [
+    'To: ' + to,
+    cc ? 'Cc: ' + cc : null,
+    'Subject: ' + encSubject,
+    'MIME-Version: 1.0',
+    'Content-Type: text/plain; charset=utf-8',
+    'Content-Transfer-Encoding: base64',
+    '',
+    encBody
+  ].filter(l => l !== null).join('\r\n');
+  return btoa(unescape(encodeURIComponent(lines))).replace(/\+/g,'-').replace(/\//g,'_').replace(/=/g,'');
 }
 
 /* ============================================================
@@ -1377,6 +1448,7 @@ function openSettings() {
   document.getElementById('cfgExtraKeywords').value = S.config.extraKeywords || '';
   const sel = document.getElementById('cfgFetchDays');
   if (sel) sel.value = String(S.config.fetchDays || 30);
+  document.getElementById('cfgSignature').value = S.config.signature || '';
   document.getElementById('settingsModal').classList.add('show');
 }
 function closeSettings() { document.getElementById('settingsModal').classList.remove('show'); }
@@ -1385,10 +1457,22 @@ function saveSettings() {
   S.config.clientId     = document.getElementById('cfgClientId').value.trim();
   S.config.extraKeywords= document.getElementById('cfgExtraKeywords').value.trim();
   S.config.fetchDays    = parseInt(document.getElementById('cfgFetchDays').value) || 30;
+  S.config.signature    = document.getElementById('cfgSignature').value;
   saveState();
   closeSettings();
   toast('設定を保存しました', 'ok');
 }
+function clearMailsOnly() {
+  if (!confirm('取得済みメールをすべて削除して再取得しますか？\n（設定・案件・タスクは保持されます）')) return;
+  S.mails = [];
+  S.selectedMail = null;
+  S.expandedThreads = new Set();
+  saveState();
+  renderAll();
+  document.getElementById('detailPanel').innerHTML = '<div class="empty" style="height:100%"><div class="empty-icon">✉️</div><div class="empty-title">メールを選択してください</div></div>';
+  toast('メールをリセットしました。「メール取得」で再取得してください', 'ok');
+}
+
 function resetAll() {
   if (!confirm('すべてのデータ（メール・案件・タスク・設定）をリセットしますか？')) return;
   localStorage.removeItem(LS_KEY);
