@@ -248,7 +248,14 @@ code { font-family: 'Space Mono', monospace; font-size: 10px; background: var(--
     </div>
 
     <div class="setup-step">
-      <div class="setup-step-title"><div class="step-num">2</div>Gmail連携（Google OAuth2）</div>
+      <div class="setup-step-title"><div class="step-num">2</div>自分のメールアドレス</div>
+      <p>CC返信時に自分のアドレスを除外するために使います。</p>
+      <div class="setup-field">
+        <input class="setup-input" type="email" id="setupMyEmail" placeholder="m-komukai@example.jp">
+      </div>
+    </div>
+    <div class="setup-step">
+      <div class="setup-step-title"><div class="step-num">3</div>Gmail連携（Google OAuth2）</div>
       <p>GmailへのアクセスにGoogle OAuth2クライアントIDが必要です。<br>
       <a href="https://console.cloud.google.com/apis/credentials" target="_blank">Google Cloud Console</a> → 「認証情報を作成」→「OAuthクライアントID」<br>
       アプリの種類：<code>ウェブアプリ</code> / 承認済みオリジン：<code>null</code>（ローカルファイルの場合）または実際のURL<br>
@@ -259,7 +266,7 @@ code { font-family: 'Space Mono', monospace; font-size: 10px; background: var(--
     </div>
 
     <div class="setup-step">
-      <div class="setup-step-title"><div class="step-num">3</div>追加カテゴリキーワード（任意）</div>
+      <div class="setup-step-title"><div class="step-num">4</div>追加カテゴリキーワード（任意）</div>
       <p>モデル・スタジオ・ヘアメイク・カメラマンは固定で設定済みです。<br>
       追加で検索に使いたいキーワードがあればカンマ区切りで入力してください。<br>
       例：<code>オーディション, 撮影スペース, フォトグラファー</code></p>
@@ -268,7 +275,7 @@ code { font-family: 'Space Mono', monospace; font-size: 10px; background: var(--
       </div>
     </div>
     <div class="setup-step">
-      <div class="setup-step-title"><div class="step-num">4</div>取得期間</div>
+      <div class="setup-step-title"><div class="step-num">5</div>取得期間</div>
       <p>直近何日分のメールを取得するか設定します（デフォルト：30日）</p>
       <div class="setup-field">
         <select class="setup-input" id="setupDays">
@@ -329,6 +336,10 @@ code { font-family: 'Space Mono', monospace; font-size: 10px; background: var(--
     <div class="modal-field">
       <div class="modal-lbl">Google OAuth クライアントID</div>
       <input class="modal-input" type="text" id="cfgClientId">
+    </div>
+    <div class="modal-field">
+      <div class="modal-lbl">自分のメールアドレス（CC・Toから自動除外）</div>
+      <input class="modal-input" type="email" id="cfgMyEmail" placeholder="例：m-komukai@example.jp">
     </div>
     <div style="background:var(--surface2);border-radius:8px;padding:14px;margin-bottom:12px">
       <div class="modal-lbl" style="margin-bottom:10px">カテゴリキーワード（固定＋追加）</div>
@@ -495,9 +506,10 @@ const S = {
   config: {
     geminiKey: '',
     clientId: '',
-    extraKeywords: '',  // ユーザー追加KW（任意）
-    fetchDays: 30,      // 取得期間（日数）
-    signature: ''       // メール署名
+    myEmail: '',        // 自分のメールアドレス（CC除外用）
+    extraKeywords: '',
+    fetchDays: 30,
+    signature: ''
   }
 };
 
@@ -594,11 +606,13 @@ window.addEventListener('DOMContentLoaded', () => {
 function saveSetup() {
   const key = document.getElementById('setupGeminiKey').value.trim();
   const cid = document.getElementById('setupClientId').value.trim();
+  const myEmail = document.getElementById('setupMyEmail')?.value.trim().toLowerCase() || '';
   const kw  = document.getElementById('setupKeywords').value.trim();
   const days = document.getElementById('setupDays').value;
   if (!key) { toast('Gemini APIキーを入力してください', 'err'); return; }
   S.config.geminiKey = key;
   S.config.clientId  = cid;
+  S.config.myEmail   = myEmail;
   S.config.extraKeywords = kw;
   S.config.fetchDays = parseInt(days) || 30;
   saveState();
@@ -711,9 +725,16 @@ async function fetchMails() {
     const existingThreadIds = new Set(S.mails.map(m => m.threadId).filter(Boolean));
     let totalAdded = 0;
 
-    const gmailFetch = (url) =>
-      fetch(url, { headers: { Authorization: `Bearer ${S.gmailToken}` } })
-        .then(r => { if (r.status === 401) throw new Error('AUTH_EXPIRED'); return r.json(); });
+    const gmailFetch = async (url) => {
+      const r = await fetch(url, { headers: { Authorization: `Bearer ${S.gmailToken}` } });
+      if (r.status === 401) {
+        S.gmailToken = null;
+        localStorage.removeItem('shootmail_gtoken');
+        updateGmailStatus();
+        throw new Error('AUTH_EXPIRED');
+      }
+      return r.json();
+    };
 
     for (const proj of S.projects) {
       const q = buildSearchQuery(proj);
@@ -1318,9 +1339,21 @@ async function sendReply(mailId) {
   const replyBody = document.getElementById('replyTa')?.value;
   if (!replyBody?.trim()) { toast('返信内容を入力してください', 'err'); return; }
 
-  // 全員返信：送信者 + 元のTo（自分以外）+ CC
+  // 全員返信：送信者 + 元のTo・CCから自分のアドレスを除外
+  const myEmail = (S.config.myEmail || '').toLowerCase();
   const toAddrs = m.sender || '';
-  const ccAddrs = [m.cc, m.to].filter(a => a && a !== 'me' && !a.includes(S.config.clientId)).join(', ').replace(/,\s*,/g,',').trim();
+  // CC + 元のToをまとめてフィルタ（自分・空・"me" を除外）
+  const ccRaw = [m.cc, m.to]
+    .flatMap(a => (a||'').split(','))
+    .map(a => a.trim())
+    .filter(a => {
+      if (!a || a === 'me') return false;
+      if (myEmail && a.toLowerCase().includes(myEmail)) return false;
+      // 送信者（To）と重複する場合も除外
+      if (m.sender && a.toLowerCase().includes(m.sender.toLowerCase().replace(/.*<|>.*/g,''))) return false;
+      return true;
+    });
+  const ccAddrs = [...new Set(ccRaw)].join(', ');
   const confirmMsg = ccAddrs
     ? 'To: ' + senderName(m.sender) + '\nCC: ' + ccAddrs + '\n\n全員に返信しますか？'
     : '「' + senderName(m.sender) + '」へ返信を送信しますか？';
@@ -1355,8 +1388,16 @@ async function sendReply(mailId) {
       switchTab('summary');
       renderDetail(S.mails.find(x=>x.id===mailId));
     } else {
-      const err = await res.json();
-      throw new Error(err.error?.message || '送信失敗');
+      const errData = await res.json();
+      const errMsg = errData.error?.message || '送信失敗';
+      if (res.status === 401) {
+        S.gmailToken = null;
+        localStorage.removeItem('shootmail_gtoken');
+        updateGmailStatus();
+        toast('Gmail認証が切れました。ヘッダーの「Gmailに接続」から再接続してください', 'err');
+        return;
+      }
+      throw new Error(errMsg);
     }
   } catch(e) { toast('送信エラー: ' + e.message, 'err'); }
   finally { loading(false); }
@@ -1511,6 +1552,7 @@ function createProject() {
 function openSettings() {
   document.getElementById('cfgGeminiKey').value = S.config.geminiKey;
   document.getElementById('cfgClientId').value = S.config.clientId;
+  document.getElementById('cfgMyEmail').value = S.config.myEmail || '';
   document.getElementById('cfgExtraKeywords').value = S.config.extraKeywords || '';
   const sel = document.getElementById('cfgFetchDays');
   if (sel) sel.value = String(S.config.fetchDays || 30);
@@ -1521,6 +1563,7 @@ function closeSettings() { document.getElementById('settingsModal').classList.re
 function saveSettings() {
   S.config.geminiKey    = document.getElementById('cfgGeminiKey').value.trim();
   S.config.clientId     = document.getElementById('cfgClientId').value.trim();
+  S.config.myEmail      = document.getElementById('cfgMyEmail').value.trim().toLowerCase();
   S.config.extraKeywords= document.getElementById('cfgExtraKeywords').value.trim();
   S.config.fetchDays    = parseInt(document.getElementById('cfgFetchDays').value) || 30;
   S.config.signature    = document.getElementById('cfgSignature').value;
