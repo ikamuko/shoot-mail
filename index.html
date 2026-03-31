@@ -392,6 +392,10 @@ code { font-family: 'Space Mono', monospace; font-size: 10px; background: var(--
         <span style="font-size:13px">🔔</span> 未読
         <span class="badge" id="badge-unread">0</span>
       </div>
+      <div class="nav-item" id="nav-waiting" onclick="setNav('waiting')">
+        <span style="font-size:13px">⏳</span> 返信待ち
+        <span class="badge" id="badge-waiting">0</span>
+      </div>
     </div>
     <div class="sidebar-section">
       <div class="sidebar-label">カテゴリ</div>
@@ -478,7 +482,9 @@ code { font-family: 'Space Mono', monospace; font-size: 10px; background: var(--
 const S = {
   mails: [],
   projects: [],
-  tasks: {},       // mailId -> [{text,done}]
+  tasks: {},        // mailId -> [{text,done,note}]
+  mailStatus: {},   // mailId -> 'unread'|'read'|'replied'|'waiting'
+  mailNotes: {},    // mailId -> string（メモ）
   projInfo: {},    // projId -> {shootDate,location,budget,...}
   selectedMail: null,
   selectedProj: 'all',
@@ -549,6 +555,8 @@ function saveState() {
       projects: S.projects,
       tasks: S.tasks,
       projInfo: S.projInfo,
+      mailStatus: S.mailStatus,
+      mailNotes: S.mailNotes,
       config: S.config
     };
     localStorage.setItem(LS_KEY, JSON.stringify(save));
@@ -564,6 +572,8 @@ function loadState() {
     if (d.projects) S.projects = d.projects;
     if (d.tasks) S.tasks = d.tasks;
     if (d.projInfo) S.projInfo = d.projInfo;
+    if (d.mailStatus) S.mailStatus = d.mailStatus;
+    if (d.mailNotes) S.mailNotes = d.mailNotes;
     if (d.mails) S.mails = d.mails;
     return !!(S.config.geminiKey || S.projects.length > 0 || S.mails.length > 0);
   } catch(e) { return false; }
@@ -777,6 +787,7 @@ async function fetchMails() {
 function parseGmailMsg(msg) {
   const h = Object.fromEntries((msg.payload?.headers||[]).map(h=>[h.name.toLowerCase(), h.value]));
   const body = extractBody(msg.payload);
+  const isUnread = (msg.labelIds||[]).includes('UNREAD');
   return {
     id: msg.id,
     threadId: msg.threadId,
@@ -790,8 +801,9 @@ function parseGmailMsg(msg) {
     category: detectCategory(h.subject + ' ' + body + ' ' + (h.from||'')),
     project: null,
     aiSummary: null,
-    read: !(msg.labelIds||[]).includes('UNREAD'),
-    labelIds: msg.labelIds || []
+    read: !isUnread,
+    labelIds: msg.labelIds || [],
+    _initialStatus: isUnread ? 'unread' : 'read'  // 初期ステータスのヒント
   };
 }
 
@@ -916,7 +928,8 @@ function renderMailList() {
   let mails = S.mails;
 
   // Nav filter
-  if (S.currentNav === 'unread') mails = mails.filter(m=>!m.read);
+  if (S.currentNav === 'unread') mails = mails.filter(m=>S.mailStatus[m.id]==='unread'||!m.read);
+  else if (S.currentNav === 'waiting') mails = mails.filter(m=>S.mailStatus[m.id]==='waiting');
   else if (['model','studio','hairmake','camera'].includes(S.currentNav)) mails = mails.filter(m=>m.category===S.currentNav);
 
   // Project filter
@@ -987,7 +1000,7 @@ function renderMailList() {
       <div class="mail-chips">
         ${latest.category!=='other'?`<span class="chip chip-${latest.category}">${CAT_LABELS[latest.category]}</span>`:''}
         ${proj?`<span class="chip chip-proj">${esc(proj.name)}</span>`:''}
-        ${hasUnread?'<span class="chip chip-new">NEW</span>':''}
+        ${(()=>{const st=S.mailStatus[latest.id];if(st==='waiting')return '<span class="chip" style="background:rgba(204,136,0,0.1);color:var(--amber);border:1px solid rgba(204,136,0,0.3)">返信待ち</span>';if(st==='replied')return '<span class="chip" style="background:rgba(45,122,45,0.1);color:var(--accent);border:1px solid rgba(45,122,45,0.3)">完了</span>';if(st==='unread'||hasUnread)return '<span class="chip chip-new">NEW</span>';return '';})()}
       </div>
     </div>`;
 
@@ -1034,6 +1047,10 @@ async function selectMail(id) {
   const m = S.mails.find(x=>x.id===id);
   if (!m) return;
   m.read = true;
+  // 未読 → 既読に自動変更（返信待ち・返信済みはそのまま）
+  if (!S.mailStatus[id] || S.mailStatus[id] === 'unread') {
+    S.mailStatus[id] = 'read';
+  }
   renderMailList();
   renderDetail(m);
   renderTaskPanel(m);
@@ -1044,12 +1061,24 @@ async function selectMail(id) {
 
 function renderDetail(m) {
   const el = document.getElementById('detailPanel');
+  const st = S.mailStatus[m.id] || (m.read ? 'read' : 'unread');
+  const statusColor = {unread:'var(--blue)',read:'var(--text3)',waiting:'var(--amber)',replied:'var(--accent)'};
+  const statusLabel = {unread:'未読',read:'既読',waiting:'返信待ち（送信済）',replied:'完了・確定'};
+  const ccLine = m.cc ? `<div class="meta-text"><span>CC: </span>${esc(m.cc)}</div>` : '';
   el.innerHTML = `
     <div class="detail-header">
-      <div class="detail-subject">${esc(m.subject)}</div>
+      <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:12px;margin-bottom:8px">
+        <div class="detail-subject" style="flex:1">${esc(m.subject)}</div>
+        <div style="display:flex;align-items:center;gap:6px;flex-shrink:0">
+          <select class="meta-select" onchange="setMailStatus('${m.id}',this.value)" style="font-weight:700;color:${statusColor[st]||'var(--text2)'}">
+            ${Object.entries(statusLabel).map(([k,v])=>`<option value="${k}" ${st===k?'selected':''}>${v}</option>`).join('')}
+          </select>
+        </div>
+      </div>
       <div class="detail-meta">
         <div class="meta-text"><span>From: </span>${esc(m.sender)}</div>
         <div class="meta-text"><span>日時: </span>${esc(m.date)}</div>
+        ${ccLine}
         <select class="meta-select" onchange="changeCat('${m.id}',this.value)">
           ${['model','studio','hairmake','camera','other'].map(c=>`<option value="${c}" ${m.category===c?'selected':''}>${CAT_LABELS[c]}</option>`).join('')}
         </select>
@@ -1067,15 +1096,20 @@ function renderDetail(m) {
     <div class="detail-body" id="detailBody">${renderSummaryContent(m)}</div>
     <div class="reply-area" id="replyArea" style="display:none">
       <div class="reply-hd">
-        <div class="reply-hd-label">REPLY</div>
-        <div class="reply-hd-to">To: ${esc(m.sender)}</div>
+        <div class="reply-hd-label" style="font-size:10px;font-weight:700;color:var(--text3);letter-spacing:1px">全員に返信</div>
+        <div style="font-size:11px;color:var(--text2);flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;margin-left:8px">
+          To: ${esc(m.sender)}${m.cc ? ' ／ CC: '+esc(m.cc) : ''}
+        </div>
       </div>
-      <textarea class="reply-ta" id="replyTa" placeholder="返信内容..."></textarea>
+      <textarea class="reply-ta" id="replyTa" placeholder="返信内容を入力..."></textarea>
       <div class="reply-ft">
-        <div><button class="btn btn-sm" onclick="generateDraft('${m.id}')">✨ AI下書き</button></div>
+        <div style="display:flex;gap:6px">
+          <button class="btn btn-sm" onclick="generateDraft('${m.id}')">✨ AI下書き</button>
+          <button class="btn btn-sm" onclick="insertSignature()">署名挿入</button>
+        </div>
         <div style="display:flex;gap:7px">
           <button class="btn btn-sm" onclick="switchTab('summary')">キャンセル</button>
-          <button class="btn btn-sm btn-primary" onclick="sendReply('${m.id}')">送信</button>
+          <button class="btn btn-sm btn-primary" onclick="sendReply('${m.id}')">全員に返信</button>
         </div>
       </div>
     </div>
@@ -1128,6 +1162,16 @@ function switchTab(tab) {
       ta.focus();
     }
   }
+}
+
+function setMailStatus(mailId, status) {
+  S.mailStatus[mailId] = status;
+  // 返信済みにしたらreadも立てる
+  const m = S.mails.find(x=>x.id===mailId);
+  if (m && status === 'replied') m.read = true;
+  renderMailList();
+  updateBadges();
+  saveState();
 }
 
 function changeCat(id, cat) {
@@ -1301,7 +1345,15 @@ async function sendReply(mailId) {
     if (res.ok) {
       toast('全員に返信しました', 'ok');
       document.getElementById('replyTa').value = '';
+      // ステータスを自動で「返信済み」に
+      S.mailStatus[mailId] = 'waiting'; // 返信した → 相手の返信待ち
+      const sentM = S.mails.find(x=>x.id===mailId);
+      if (sentM) sentM.read = true;
+      renderMailList();
+      updateBadges();
+      saveState();
       switchTab('summary');
+      renderDetail(S.mails.find(x=>x.id===mailId));
     } else {
       const err = await res.json();
       throw new Error(err.error?.message || '送信失敗');
@@ -1330,7 +1382,7 @@ function makeGmailRaw(to, cc, subject, body) {
    TASK PANEL
    ============================================================ */
 function renderTaskPanel(m) {
-  // Project info
+  // 案件情報
   const p = S.projects.find(x=>x.id===m.project);
   const info = S.projInfo[m.project] || {};
   const infoEl = document.getElementById('projInfoArea');
@@ -1344,8 +1396,20 @@ function renderTaskPanel(m) {
   } else {
     infoEl.innerHTML = `<div style="font-size:11px;color:var(--text3);text-align:center;padding:10px 0">案件を設定すると<br>詳細を管理できます</div>`;
   }
-  // Tasks
+  // 担当者ごとのメモ（メールID紐付け）
+  const noteEl = document.getElementById('mailNoteArea');
+  if (noteEl) noteEl.value = S.mailNotes[m.id] || '';
+  // 担当者ラベル
+  const ownerEl = document.getElementById('taskOwnerLabel');
+  if (ownerEl) ownerEl.textContent = senderName(m.sender) + 'さん';
+  // タスク（メールIDで完全分離）
   renderTasks(m.id, m.category);
+}
+
+function saveMailNote(val) {
+  const id = S.selectedMail; if (!id) return;
+  S.mailNotes[id] = val;
+  saveState();
 }
 
 function renderTasks(mailId, cat) {
@@ -1407,7 +1471,9 @@ function setNav(nav) {
 function updateBadges() {
   const m = S.mails;
   document.getElementById('badge-all').textContent = m.length;
-  document.getElementById('badge-unread').textContent = m.filter(x=>!x.read).length;
+  document.getElementById('badge-unread').textContent = m.filter(x=>S.mailStatus[x.id]==='unread'||!x.read).length;
+  const waitingEl = document.getElementById('badge-waiting');
+  if (waitingEl) waitingEl.textContent = m.filter(x=>S.mailStatus[x.id]==='waiting').length;
   document.getElementById('badge-model').textContent = m.filter(x=>x.category==='model').length;
   document.getElementById('badge-studio').textContent = m.filter(x=>x.category==='studio').length;
   document.getElementById('badge-hairmake').textContent = m.filter(x=>x.category==='hairmake').length;
