@@ -394,7 +394,13 @@ code { font-family: 'Space Mono', monospace; font-size: 10px; background: var(--
   <!-- SIDEBAR -->
   <div class="sidebar">
     <div class="sidebar-section">
-      <div class="sidebar-label">表示</div>
+      <div class="sidebar-label" style="display:flex;align-items:center;justify-content:space-between;padding-right:4px">
+        表示
+        <label style="display:flex;align-items:center;gap:4px;cursor:pointer;font-size:9px;color:var(--text3);font-weight:400;letter-spacing:0;text-transform:none">
+          <input type="checkbox" id="hideSkippedToggle" onchange="toggleHideSkipped(this.checked)" style="width:12px;height:12px;cursor:pointer;accent-color:var(--accent)">
+          対応不要を隠す
+        </label>
+      </div>
       <div class="nav-item active" id="nav-all" onclick="setNav('all')">
         <span style="font-size:13px">📥</span> すべて
         <span class="badge" id="badge-all">0</span>
@@ -496,6 +502,7 @@ const S = {
   tasks: {},        // mailId -> [{text,done,note}]
   mailStatus: {},   // mailId -> 'unread'|'read'|'replied'|'waiting'
   mailNotes: {},    // mailId -> string（メモ）
+  hideSkipped: false, // 対応不要メールを非表示にするか
   projInfo: {},    // projId -> {shootDate,location,budget,...}
   selectedMail: null,
   selectedProj: 'all',
@@ -569,6 +576,7 @@ function saveState() {
       projInfo: S.projInfo,
       mailStatus: S.mailStatus,
       mailNotes: S.mailNotes,
+      hideSkipped: S.hideSkipped,
       config: S.config
     };
     localStorage.setItem(LS_KEY, JSON.stringify(save));
@@ -586,6 +594,7 @@ function loadState() {
     if (d.projInfo) S.projInfo = d.projInfo;
     if (d.mailStatus) S.mailStatus = d.mailStatus;
     if (d.mailNotes) S.mailNotes = d.mailNotes;
+    if (d.hideSkipped !== undefined) S.hideSkipped = d.hideSkipped;
     if (d.mails) S.mails = d.mails;
     return !!(S.config.geminiKey || S.projects.length > 0 || S.mails.length > 0);
   } catch(e) { return false; }
@@ -633,6 +642,8 @@ function renderAll() {
   renderProjTree();
   renderMailList();
   updateBadges();
+  const toggleEl = document.getElementById('hideSkippedToggle');
+  if (toggleEl) toggleEl.checked = S.hideSkipped;
 }
 
 /* ============================================================
@@ -952,6 +963,8 @@ function renderMailList() {
   if (S.currentNav === 'unread') mails = mails.filter(m=>S.mailStatus[m.id]==='unread'||!m.read);
   else if (S.currentNav === 'waiting') mails = mails.filter(m=>S.mailStatus[m.id]==='waiting');
   else if (['model','studio','hairmake','camera'].includes(S.currentNav)) mails = mails.filter(m=>m.category===S.currentNav);
+  // 対応不要を隠す
+  if (S.hideSkipped) mails = mails.filter(m=>S.mailStatus[m.id]!=='skip');
 
   // Project filter
   if (S.selectedProj !== 'all') {
@@ -1004,8 +1017,9 @@ function renderMailList() {
     // スレッド内の送信者をユニークで列挙
     const senders = [...new Set(msgs.map(m=>senderName(m.sender)))].slice(0,3).join(', ');
 
+    const isSkipped = msgs.every(m=>S.mailStatus[m.id]==='skip');
     const headerHtml = `<div class="mail-item ${hasUnread?'unread':''} ${isSelected&&!isExpanded?'selected':''} thread-header"
-      onclick="toggleThread('${tid}')" style="cursor:pointer">
+      onclick="toggleThread('${tid}')" style="cursor:pointer;${isSkipped?'opacity:0.35;filter:grayscale(0.5)':''}">
       <div class="mail-row1">
         <div class="mail-sender" style="display:flex;align-items:center;gap:5px">
           ${count>1?`<span style="font-size:9px;background:var(--surface3);padding:1px 5px;border-radius:3px;color:var(--text3);flex-shrink:0">${count}</span>`:''}
@@ -1021,7 +1035,7 @@ function renderMailList() {
       <div class="mail-chips">
         ${latest.category!=='other'?`<span class="chip chip-${latest.category}">${CAT_LABELS[latest.category]}</span>`:''}
         ${proj?`<span class="chip chip-proj">${esc(proj.name)}</span>`:''}
-        ${(()=>{const st=S.mailStatus[latest.id];if(st==='waiting')return '<span class="chip" style="background:rgba(204,136,0,0.1);color:var(--amber);border:1px solid rgba(204,136,0,0.3)">返信待ち</span>';if(st==='replied')return '<span class="chip" style="background:rgba(45,122,45,0.1);color:var(--accent);border:1px solid rgba(45,122,45,0.3)">完了</span>';if(st==='unread'||hasUnread)return '<span class="chip chip-new">NEW</span>';return '';})()}
+        ${(()=>{const st=S.mailStatus[latest.id];if(st==='waiting')return '<span class="chip" style="background:rgba(204,136,0,0.1);color:var(--amber);border:1px solid rgba(204,136,0,0.3)">返信待ち</span>';if(st==='replied')return '<span class="chip" style="background:rgba(45,122,45,0.1);color:var(--accent);border:1px solid rgba(45,122,45,0.3)">完了</span>';if(st==='skip')return '<span class="chip" style="background:rgba(0,0,0,0.05);color:var(--text3);border:1px solid var(--border)">対応不要</span>';if(st==='unread'||hasUnread)return '<span class="chip chip-new">NEW</span>';return '';})()}
       </div>
     </div>`;
 
@@ -1083,8 +1097,8 @@ async function selectMail(id) {
 function renderDetail(m) {
   const el = document.getElementById('detailPanel');
   const st = S.mailStatus[m.id] || (m.read ? 'read' : 'unread');
-  const statusColor = {unread:'var(--blue)',read:'var(--text3)',waiting:'var(--amber)',replied:'var(--accent)'};
-  const statusLabel = {unread:'未読',read:'既読',waiting:'返信待ち（送信済）',replied:'完了・確定'};
+  const statusColor = {unread:'var(--blue)',read:'var(--text3)',waiting:'var(--amber)',replied:'var(--accent)',skip:'var(--text3)'};
+  const statusLabel = {unread:'未読',read:'既読',waiting:'返信待ち（送信済）',replied:'完了・確定',skip:'対応不要'};
   const ccLine = m.cc ? `<div class="meta-text"><span>CC: </span>${esc(m.cc)}</div>` : '';
   el.innerHTML = `
     <div class="detail-header">
@@ -1502,6 +1516,12 @@ function saveProjInfo(projId, key, val) {
 /* ============================================================
    NAVIGATION
    ============================================================ */
+function toggleHideSkipped(val) {
+  S.hideSkipped = val;
+  saveState();
+  renderMailList();
+}
+
 function setNav(nav) {
   S.currentNav = nav;
   document.querySelectorAll('.nav-item').forEach(el=>el.classList.remove('active'));
@@ -1515,6 +1535,9 @@ function updateBadges() {
   document.getElementById('badge-unread').textContent = m.filter(x=>S.mailStatus[x.id]==='unread'||!x.read).length;
   const waitingEl = document.getElementById('badge-waiting');
   if (waitingEl) waitingEl.textContent = m.filter(x=>S.mailStatus[x.id]==='waiting').length;
+  // トグルの状態を復元
+  const toggleEl = document.getElementById('hideSkippedToggle');
+  if (toggleEl) toggleEl.checked = S.hideSkipped;
   document.getElementById('badge-model').textContent = m.filter(x=>x.category==='model').length;
   document.getElementById('badge-studio').textContent = m.filter(x=>x.category==='studio').length;
   document.getElementById('badge-hairmake').textContent = m.filter(x=>x.category==='hairmake').length;
